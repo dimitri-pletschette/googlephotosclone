@@ -13,19 +13,17 @@ jobs:
     steps:
       - name: Check if PR is from Dependabot
         id: check
-        run: echo "::set-output name=is_dependabot::$(jq -r .pull_request.user.login $GITHUB_EVENT_PATH | grep -q dependabot && echo true || echo false)"
+        run: echo "is_dependabot=$(jq -r .pull_request.user.login $GITHUB_EVENT_PATH | grep -q dependabot && echo true || echo false)" >> $GITHUB_ENV
         
       - name: Auto-approve Dependabot PR
-        if: steps.check.outputs.is_dependabot == 'true'
+        if: env.is_dependabot == 'true'
         run: gh pr review --approve "$PR_URL"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        env:
           PR_URL: ${{ github.event.pull_request.html_url }}
 
       - name: Merge Dependabot PR
-        if: steps.check.outputs.is_dependabot == 'true'
+        if: env.is_dependabot == 'true'
         run: gh pr merge --auto --squash "$PR_URL"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
