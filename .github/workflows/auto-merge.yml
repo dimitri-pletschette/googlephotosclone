@@ -1,30 +1,58 @@
-name: Auto Merge Dependabot PRs
+name: Dependabot auto-merge
 
 on:
   pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  statuses: read
 
 jobs:
   dependabot:
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
-    steps:
-      - name: Check if PR is from Dependabot
-        id: check
-        run: echo "is_dependabot=$(jq -r .pull_request.user.login $GITHUB_EVENT_PATH | grep -q dependabot && echo true || echo false)" >> $GITHUB_ENV
-        
-      - name: Auto-approve Dependabot PR
-        if: env.is_dependabot == 'true'
-        run: gh pr review --approve "$PR_URL"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
 
-      - name: Merge Dependabot PR
-        if: env.is_dependabot == 'true'
-        run: gh pr merge --auto --squash "$PR_URL"
+    steps:
+      - name: Wait for checks
+        run: sleep 60
+
+      - name: Check PR status
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          echo "Checking PR status..."
+
+          for i in {1..10}; do
+            STATUS=$(gh pr checks "$PR_URL" --json state \
+              --jq 'if length == 0 then "NONE" elif any(.[]; .state == "FAILURE" or .state == "ERROR") then "FAILURE" elif any(.[]; .state == "PENDING") then "PENDING" else "SUCCESS" end')
+
+            echo "Status: $STATUS"
+
+            if [ "$STATUS" = "SUCCESS" ]; then
+              break
+            fi
+
+            if [ "$STATUS" = "FAILURE" ]; then
+              echo "A required check failed. Not enabling auto-merge."
+              exit 1
+            fi
+
+            echo "Checks still running. Waiting 60 seconds..."
+            sleep 60
+          done
+
+          if [ "$STATUS" != "SUCCESS" ]; then
+            echo "Checks did not complete successfully."
+            exit 1
+          fi
+
+      - name: Enable auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh pr merge "$PR_URL" --auto --merge
